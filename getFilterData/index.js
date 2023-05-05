@@ -1,9 +1,8 @@
-const azureStorage = require('azure-storage');
+const { BlobServiceClient } = require("@azure/storage-blob");
 const openai = require('openai');
 require('dotenv').config();
 
-const blobService = azureStorage.createBlobService();
-
+const STORAGE_NAME = 'aihackathon2023';
 const CONTAINER_NAME = 'aihackathoncontainer';
 
 const { Configuration, OpenAIApi } = openai;
@@ -21,17 +20,19 @@ module.exports = async function (context, req) {
         context.log('Error: Filename empty or undefined');
         return;
     }
-
+    const blobServiceClient = new BlobServiceClient(STORAGE_NAME);
+    const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
     // Retrieve the JSON file from a storage blob
     let blobContent = null;
     try{ 
-        blobContent = await getBlobContent(CONTAINER_NAME, jsonFileName);
+        blobContent = await getBlobContent(containerClient, jsonFileName);
     } catch(e) {
         context.log(`Error: ${e}`);
         return;
     }
 
     // Fire off the request to OpenAI, iterate through the json objects
+    let newJSONData = [];
     for (let i = 0; i < blobContent.length; i++) {
         const response = await openAI.createCompletion({
             model: 'text-davinci-003',
@@ -65,9 +66,16 @@ module.exports = async function (context, req) {
         });
         console.log(`processing ${i} : ${blobContent[i].email} | response: ${JSON.stringify(response)}`);
         // TODO: Update the blob file with an additional classification column
-        // TODO: Create Cosmos DB records for every iteration if it does not exist
-        // TODO: Update the DB records according to the responses
+        newJSONData.push({
+            User: blobContent[i].email,
+            Subject: blobContent[i].subject,
+            Body: blobContent[i].body,
+            Label: ''
+        });
     }
+    
+    // TODO: Create Cosmos DB records for every iteration if it does not exist
+    // TODO: Update the DB records according to the responses
 
     const responseMessage = "Function executed successfully.";
 
@@ -76,14 +84,25 @@ module.exports = async function (context, req) {
     };
 }
 
-async function getBlobContent(containerName, blobName) {
+async function getBlobContent(containerClient, blobName) {
+    const blobClient = await containerClient.getBlobClient(blobName);
+
+    const downloadResponse = await blobClient.download();
+
+    const downloaded = await streamToBuffer(downloadResponse.readableStreamBody);
+    console.log('Downloaded blob content:', downloaded.toString());
+    return downloaded.toString();
+}
+
+async function streamToBuffer(readableStream) {
     return new Promise((resolve, reject) => {
-      blobService.getBlobToText(containerName, blobName, function(err, blobContent) {
-          if (err) {
-              reject(err);
-          } else {
-              resolve(blobContent);
-          }
-      });
+        const chunks = [];
+        readableStream.on('data', (data) => {
+            chunks.push(data instanceof Buffer ? data : Buffer.from(data));
+        });
+        readableStream.on('end', () => {
+            resolve(Buffer.concat(chunks));
+        });
+        readableStream.on('error', reject);
     });
 }
