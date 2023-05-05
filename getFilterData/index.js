@@ -1,5 +1,6 @@
 const azureStorage = require('azure-storage');
 const openai = require('openai');
+require('dotenv').config();
 
 const blobService = azureStorage.createBlobService();
 
@@ -7,8 +8,8 @@ const CONTAINER_NAME = 'aihackathoncontainer';
 
 const { Configuration, OpenAIApi } = openai;
 const configuration = new Configuration({
-    organization: "org-i16GdI3biVetsydNnhzCYRLs",
-    apiKey: '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',
+    organization: process.env.OPEN_AI_ORGANIZATION,
+    apiKey: process.env.OPEN_AI_API_KEY,
 });
 const openAI = new OpenAIApi(configuration);
 
@@ -22,7 +23,13 @@ module.exports = async function (context, req) {
     }
 
     // Retrieve the JSON file from a storage blob
-    const blobContent = await getBlobContent(CONTAINER_NAME, jsonFileName);
+    let blobContent = null;
+    try{ 
+        blobContent = await getBlobContent(CONTAINER_NAME, jsonFileName);
+    } catch(e) {
+        context.log(`Error: ${e}`);
+        return;
+    }
 
     // Fire off the request to OpenAI, iterate through the json objects
     for (let i = 0; i < blobContent.length; i++) {
