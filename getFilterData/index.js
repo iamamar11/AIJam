@@ -1,6 +1,6 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
-const openai = require('openai');
-const dotenv = require('dotenv')
+const dotenv = require("dotenv");
+const { Configuration, OpenAIApi } = require("openai");
 
 dotenv.config()
 
@@ -21,7 +21,7 @@ module.exports = async function (context, req) {
         const containerClient = blobServiceClient.getContainerClient(process.env.CONTAINER_NAME);
         const blobClient = containerClient.getBlockBlobClient(req.body.jsonFileName);
         const downloadResponse = await blobClient.download();
-        await streamToString(downloadResponse.readableStreamBody);
+        blobContent = await streamToString(downloadResponse.readableStreamBody);
     } catch(e) {
         context.res = {
             status: 404,
@@ -30,48 +30,67 @@ module.exports = async function (context, req) {
         return;
     }
 
-    // Fire off the request to OpenAI, iterate through the json objects
-   // let newJSONData = [];
-    // for (let i = 0; i < blobContent.length; i++) {
-    //     const response = await openAI.createCompletion({
-    //         model: 'text-davinci-003',
-    //         prompt: `The following AI tool helps the IT support team classify an email into labels that are: urgent, non urgent, spam. Questions and concerns are good examples of urgent emails.\n\n` + 
-    //         //Context Example
-    //         `User: John Smith\n` +
-    //         `Subject: Require immediate assistance\n` + 
-    //         `Body: Need help. Contact asap\n` +
-    //         `Label: Urgent\n` + 
-            
-    //         //Context Example
-    //         `User: Jane Doe\n` + 
-    //         `Subject: Increase your Website Traffic by 100%\n` + 
-    //         `Body: Dear Sir/Madam, we are a fast traffic company that wants to provide you this excellent service. Buy it now.\n` + 
-    //         `Label: Non Urgent\n` + 
-            
-    //         //Context Example
-    //         `User: Jeff Bezos\n` + 
-    //         `Subject: You've won\n` + 
-    //         `Body: Amazon is sending you a refunding of $88.91. Please click this link immediately. Offer only valid for next 20 minutes.\n` + 
-    //         `Label: Spam\n` + 
-            
-    //         //Actual use case
-    //         `User: ${blobContent[i].email}\n` + 
-    //         `Subject: ${blobContent[i].subject}\n` + 
-    //         `Body: ${blobContent[i].body}\n`
-    //         `Label:`,
-    //         stop: ["\n", "User:", "Subject:", "Body:", "Label:"],
-    //         max_tokens: 7,
-    //         temperature: 0
-    //     });
-    //     console.log(`processing ${i} : ${blobContent[i].email} | response: ${JSON.stringify(response)}`);
-    //     // TODO: Update the blob file with an additional classification column
-    //     newJSONData.push({
-    //         User: blobContent[i].email,
-    //         Subject: blobContent[i].subject,
-    //         Body: blobContent[i].body,
-    //         Label: ''
-    //     });
-    // }
+    const blobObj = JSON.parse(blobContent);
+    if (blobObj.length < 1) {
+        context.res = {
+            status: 200,
+            body: 'No data to read from the JSON file'
+        };
+        return;
+    }
+
+    const configuration = new Configuration({
+        basePath: `https://${process.env.OPEN_AI_RESOURCE}.openai.azure.com/openai/deployments/${process.env.OPEN_AI_DEPLOYMENT}`,
+        apiKey: process.env.OPEN_AI_API_KEY,
+    });
+
+    const openai = new OpenAIApi(configuration);
+    for(let i = 0; i < blobObj.length; i++) {
+        try {
+            const completion = await openai.createCompletion({
+                prompt: `The following AI tool helps the IT support team classify an email into labels that are: urgent, non urgent, spam. Questions and concerns are good examples of urgent emails.\n\n` + 
+                //Context Example
+                `User: johnsmith@aol.com\n` +
+                `Subject: Require immediate assistance\n` + 
+                `Body: Need help. Contact asap\n` +
+                `Label: Urgent\n` + 
+                
+                //Context Example
+                `User: janedoe@ads.com\n` + 
+                `Subject: Increase your Website Traffic by 100%\n` + 
+                `Body: Dear Sir/Madam, we are a fast traffic company that wants to provide you this excellent service. Buy it now.\n` + 
+                `Label: Non Urgent\n` + 
+                
+                //Context Example
+                `User: w1nner@amaz0n.com\n` + 
+                `Subject: You've won\n` + 
+                `Body: Amazon is sending you a refunding of $88.91. Please click this link immediately. Offer only valid for next 20 minutes.\n` + 
+                `Label: Spam\n` + 
+                
+                //Actual use case
+                `User: ${blobObj[i]['email']}\n` + 
+                `Subject: ${blobObj[i]['subject']}\n` + 
+                `Body: testingtesting\n` +
+                `Label:`,
+                stop: ["\n", "User:", "Subject:", "Body:", "Label:"],
+                max_tokens: 800,
+                temperature: 0.7,
+                frequency_penalty: 0,
+                presence_penalty: 0,
+                top_p: 0.95,
+            }, {
+              headers: {
+                'api-key': process.env.OPEN_AI_API_KEY,
+                'Content-Type': 'application/json',
+              },
+              params: { "api-version": "2022-12-01" }
+            });
+            console.log(`processing ${i} : | response: ${JSON.stringify(completion)}`);
+          } catch (e) {
+            context.log(e);
+            return "";
+          }
+    }
     
     // TODO: Create Cosmos DB records for every iteration if it does not exist
     // TODO: Update the DB records according to the responses
