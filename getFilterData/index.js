@@ -1,5 +1,5 @@
-const { BlobServiceClient } = require("@azure/storage-blob");
 const dotenv = require("dotenv");
+const { BlobServiceClient } = require("@azure/storage-blob");
 const { Configuration, OpenAIApi } = require("openai");
 
 dotenv.config()
@@ -45,60 +45,43 @@ module.exports = async function (context, req) {
     });
 
     const openai = new OpenAIApi(configuration);
-    for(let i = 0; i < blobObj.length; i++) {
-        try {
-            const completion = await openai.createCompletion({
-                prompt: `The following AI tool helps the IT support team classify an email into labels that are: urgent, non urgent, spam. Questions and concerns are good examples of urgent emails.\n\n` + 
-                //Context Example
-                `User: johnsmith@aol.com\n` +
-                `Subject: Require immediate assistance\n` + 
-                `Body: Need help. Contact asap\n` +
-                `Label: Urgent\n` + 
-                
-                //Context Example
-                `User: janedoe@ads.com\n` + 
-                `Subject: Increase your Website Traffic by 100%\n` + 
-                `Body: Dear Sir/Madam, we are a fast traffic company that wants to provide you this excellent service. Buy it now.\n` + 
-                `Label: Non Urgent\n` + 
-                
-                //Context Example
-                `User: w1nner@amaz0n.com\n` + 
-                `Subject: You've won\n` + 
-                `Body: Amazon is sending you a refunding of $88.91. Please click this link immediately. Offer only valid for next 20 minutes.\n` + 
-                `Label: Spam\n` + 
-                
-                //Actual use case
-                `User: ${blobObj[i]['email']}\n` + 
-                `Subject: ${blobObj[i]['subject']}\n` + 
-                `Body: testingtesting\n` +
-                `Label:`,
-                stop: ["\n", "User:", "Subject:", "Body:", "Label:"],
-                max_tokens: 800,
-                temperature: 0.7,
-                frequency_penalty: 0,
-                presence_penalty: 0,
-                top_p: 0.95,
-            }, {
-              headers: {
-                'api-key': process.env.OPEN_AI_API_KEY,
-                'Content-Type': 'application/json',
-              },
-              params: { "api-version": "2022-12-01" }
-            });
-            console.log(`processing ${i} : | response: ${JSON.stringify(completion)}`);
-          } catch (e) {
-            context.log(e);
-            return "";
-          }
-    }
     
+    const basePrompt = `Classify the following emails into 1 of the following categories: urgent, non urgent, spam.\n`;
+    let emailPrompt = '';
+    let response = '';
+
+    for (let i = 0; i < blobObj.length; i++) {
+        emailPrompt += `Email ${i + 1}\n` + 
+        `- Subject: ${blobObj[i]['subject']}\n` + 
+        `- Body: ${blobObj[i]['body'].toString().replace(/(\r\n|\n|\r)/gm, '')}\n` ;
+    }
+
+    try {
+        const completion = await openai.createCompletion({
+            prompt: basePrompt + emailPrompt,
+            model: 'text-davinci-003',
+            max_tokens: 100,
+        }, {
+          headers: {
+            'api-key': process.env.OPEN_AI_API_KEY,
+            'Content-Type': 'application/json',
+          },
+          params: { "api-version": "2022-12-01" }
+        });
+        console.log('completion complete! -->', completion.data.choices[0].text);
+        response = completion.data.choices[0].text;
+      } catch (e) {
+        context.log(e);
+        return "";
+      }
+
     // TODO: Create Cosmos DB records for every iteration if it does not exist
     // TODO: Update the DB records according to the responses
 
     const responseMessage = "Function executed successfully.";
 
     context.res = {
-        body: responseMessage
+        body: response
     };
 }
 
