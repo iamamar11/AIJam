@@ -48,7 +48,8 @@ module.exports = async function (context, req) {
     
     const basePrompt = `Classify the following emails into 1 of the following categories: urgent, non urgent, spam.\n`;
     let emailPrompt = '';
-    let response = '';
+    let completionResponse = null;
+    let response = [];
 
     for (let i = 0; i < blobObj.length; i++) {
         emailPrompt += `Email ${i + 1}\n` + 
@@ -68,8 +69,8 @@ module.exports = async function (context, req) {
           },
           params: { "api-version": "2022-12-01" }
         });
-        console.log('completion complete! -->', completion.data.choices[0].text);
-        response = completion.data.choices[0].text;
+        // console.log('completion complete! -->', completion.data.choices[0].text);
+        completionResponse = completion.data.choices[0].text;
       } catch (e) {
         context.log(e);
         return "";
@@ -77,8 +78,18 @@ module.exports = async function (context, req) {
 
     // TODO: Create Cosmos DB records for every iteration if it does not exist
     // TODO: Update the DB records according to the responses
-
-    const responseMessage = "Function executed successfully.";
+    if (completionResponse) {
+        let responseArr = completionResponse.split('\n').filter(el => el !== '');
+        if (responseArr.length > 0) {
+            for (let i = 0; i < blobObj.length; i++) {
+                response.push({
+                    'Subject': blobObj[i]['subject'],
+                    'Body': blobObj[i]['body'],
+                    'Label': responseArr[i].split(': ')[1].trim()
+                });
+            }
+        }
+    }
 
     context.res = {
         body: response
